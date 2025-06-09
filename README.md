@@ -28,3 +28,4 @@ Adapter options are shown in the table below.
 | adminPwd | 1234 |
 | groupPrefix | JS_,jennifer_ |
 | fixedGroup | |
+| useSsl | false |
