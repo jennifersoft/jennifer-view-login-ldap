@@ -16,11 +16,12 @@ object LdapConnector {
                 url: String="",  baseRdn: String="",
                 ntUserId: String="", ntPasswd: String="",
                 groupPrefix: List<String> = emptyList(), baseOu: String="",
-                fixedGroup: String = ""): String? {
+                fixedGroup: String = "", useSsl: Boolean=false): String? {
         try {
             val env = Hashtable<String, String>()
             env[Context.INITIAL_CONTEXT_FACTORY] = "com.sun.jndi.ldap.LdapCtxFactory"
             env[Context.PROVIDER_URL] = url
+            if (useSsl) env[Context.SECURITY_PROTOCOL] = "ssl"
             env[Context.SECURITY_AUTHENTICATION] = "simple"
             env[Context.SECURITY_PRINCIPAL] = ntUserId
             env[Context.SECURITY_CREDENTIALS] = ntPasswd
@@ -33,6 +34,7 @@ object LdapConnector {
             val usrEnv = Hashtable<String, String>()
             usrEnv[Context.INITIAL_CONTEXT_FACTORY] = "com.sun.jndi.ldap.LdapCtxFactory"
             usrEnv[Context.PROVIDER_URL] = url
+            if (useSsl) usrEnv[Context.SECURITY_PROTOCOL] = "ssl"
             usrEnv[Context.SECURITY_AUTHENTICATION] = "simple"
             usrEnv[Context.SECURITY_PRINCIPAL] = user
             usrEnv[Context.SECURITY_CREDENTIALS] = usrPw
@@ -86,7 +88,7 @@ object LdapConnector {
     }
 
     private fun getJenniferUserGroup(results: SearchResult, groupPrefix: List<String> = emptyList(), baseOu: String=""): String? {
-        val attributes = results!!.attributes
+        val attributes = results.attributes
         val memberOf = attributes["memberOf"]
 
         if (memberOf != null) {

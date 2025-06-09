@@ -16,9 +16,10 @@ class LoginAdapter : LoginHandler {
         val fixedGroup = PropertyUtil.getValue(EXT_ID, "fixedGroup", "")
         val adminId = PropertyUtil.getValue(EXT_ID, "adminId", "")
         val adminPwd = PropertyUtil.getValue(EXT_ID, "adminPwd", "")
+        val useSsl = PropertyUtil.getValue(EXT_ID, "useSsl", "false")
 
         val userGroup = LdapConnector.connect(id, password, serverUrl, baseRdn, adminId, adminPwd,
-                groupPrefix.split(","), baseOu, fixedGroup)
+                groupPrefix.split(","), baseOu, fixedGroup, useSsl.equals("true"))
 
         return if (userGroup != null) {
             UserData(id, password, userGroup, id)
