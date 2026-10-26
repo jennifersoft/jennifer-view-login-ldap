@@ -2,16 +2,26 @@ package com.aries.ldaplogin
 
 import com.aries.extension.util.LogUtil
 import java.lang.NullPointerException
+import java.net.InetSocketAddress
+import java.net.URI
 import java.util.*
 import javax.naming.AuthenticationException
+import javax.naming.CommunicationException
 import javax.naming.Context
 import javax.naming.NamingException
 import javax.naming.directory.DirContext
 import javax.naming.directory.SearchControls
 import javax.naming.directory.SearchResult
 import javax.naming.ldap.InitialLdapContext
+import javax.net.ssl.SSLSocket
+import javax.net.ssl.SSLSocketFactory
 
 object LdapConnector {
+    // serverUrl에 포트가 없을 때 쓰는 LDAPS 기본 포트
+    private const val DEFAULT_LDAPS_PORT = 636
+    // SSL 진단 접속의 연결·읽기 제한 시간(ms)
+    private const val SSL_CHECK_TIMEOUT_MS = 5000
+
     fun connect(usrId: String, usrPw: String,
                 url: String="",  baseRdn: String="",
                 ntUserId: String="", ntPasswd: String="",
@@ -54,11 +64,13 @@ object LdapConnector {
                 msg.indexOf("data 533") > 0 -> LogUtil.warn("The ID you entered is inactive (533)")
                 msg.indexOf("data 532") > 0 -> LogUtil.warn("Password has expired (532)")
                 msg.indexOf("data 701") > 0 -> LogUtil.warn("The account has expired in AD (701)")
-                else -> LogUtil.info("The login was successful")
+                else -> LogUtil.error(describeError(e))
             }
             return null
         } catch (e: NamingException) {
-            LogUtil.error(e.message)
+            LogUtil.error(describeError(e))
+            // LDAPS 연결 실패는 JDK에 따라 원인이 "simple bind failed"로 가려지므로, 직접 핸드셰이크해서 원인을 남긴다.
+            if (useSsl && e is CommunicationException) checkSslHandshake(url)
             return null
         } catch (e: NullPointerException) {
             LogUtil.error("User not found in namespace")
@@ -115,6 +127,45 @@ object LdapConnector {
 
         LogUtil.error("The group of LDAP users does not belong to the JENNIFER user group")
         return null
+    }
+
+    /**
+     * 예외 메시지에 최종 원인(root cause)을 붙인다.
+     * LDAPS 실패는 "simple bind failed" 같은 메시지만 남고 실제 원인(인증서 신뢰 실패, 호스트명 불일치 등)은
+     * cause 쪽에만 있어서, 원인을 함께 남겨야 진단할 수 있다.
+     */
+    private fun describeError(e: Throwable): String {
+        var root: Throwable = e
+        while (root.cause != null && root.cause !== root) {
+            root = root.cause!!
+        }
+        return if (root === e) "${e.message}"
+        else "${e.message} (cause: ${root.javaClass.name}: ${root.message})"
+    }
+
+    /**
+     * serverUrl로 SSL 핸드셰이크만 따로 시도해 결과를 로그에 남긴다.
+     * 인증서 신뢰 실패(PKIX path building failed), 호스트명 불일치, 포트 문제 등을 구분하기 위한 진단용이다.
+     */
+    private fun checkSslHandshake(url: String) {
+        try {
+            // PROVIDER_URL은 공백으로 여러 주소를 줄 수 있으므로 첫 번째 주소만 확인한다.
+            val uri = URI(url.trim().split(" ")[0])
+            val port = if (uri.port > 0) uri.port else DEFAULT_LDAPS_PORT
+            val socket = SSLSocketFactory.getDefault().createSocket() as SSLSocket
+            socket.use {
+                it.connect(InetSocketAddress(uri.host, port), SSL_CHECK_TIMEOUT_MS)
+                it.soTimeout = SSL_CHECK_TIMEOUT_MS
+                // JNDI LDAPS와 같은 기준으로 인증서의 호스트명을 검증한다.
+                val params = it.sslParameters
+                params.endpointIdentificationAlgorithm = "LDAPS"
+                it.sslParameters = params
+                it.startHandshake()
+            }
+            LogUtil.info("SSL handshake check succeeded (${uri.host}:$port)")
+        } catch (e: Exception) {
+            LogUtil.error("SSL handshake check failed: ${describeError(e)}")
+        }
     }
 
     private fun takeValues(args: String, key: String): Set<String> {
